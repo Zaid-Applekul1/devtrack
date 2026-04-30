@@ -34,8 +34,12 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred.');
+    } catch (err: any) {
+      // Show Supabase error message if available
+      console.error('Auth error:', err);
+      setError(
+        err?.message || err?.error_description || (typeof err === 'string' ? err : 'An error occurred.')
+      );
     } finally {
       setLoading(false);
     }

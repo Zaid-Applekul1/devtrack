@@ -1,3 +1,15 @@
+// Subtask type for subtasks table
+export type Subtask = {
+  id: string;
+  parent_task_id: string;
+  title: string;
+  description?: string;
+  status: string;
+  assigned_user_id?: string;
+  due_date?: string;
+  created_at: string;
+  completed_at?: string;
+};
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -22,14 +34,21 @@ export type Task = {
   module_name: string;
   estimated_time: number;
   actual_time: number;
-  started_at: string;
-  ended_at: string;
+  started_at?: string;
+  ended_at?: string;
   due_date?: string;
   created_at: string;
   status?: string;
   priority?: 'high' | 'medium' | 'low';
+  kanban_status?: string;
+  delay_reason?: string;
+  completed_at?: string;
+  is_recurring?: boolean;
+  recurrence_rule?: string;
+  next_occurrence?: string;
   profiles?: Profile;
   assigned_profile?: Profile;
+  subtasks?: Subtask[];
 };
 
 export type TaskTimeLog = {

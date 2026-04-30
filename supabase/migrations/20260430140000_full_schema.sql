@@ -55,11 +55,68 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at timestamptz DEFAULT now(),
   status text NOT NULL DEFAULT 'pending',
   priority text NOT NULL DEFAULT 'medium',
+  kanban_status text NOT NULL DEFAULT 'To Do', -- Kanban board status (To Do, In Progress, Review, Done)
   delay_reason text,
-  completed_at timestamptz
+  completed_at timestamptz,
+  is_recurring boolean NOT NULL DEFAULT false, -- Recurring task flag
+  recurrence_rule text, -- Recurrence rule in RFC 5545 format, e.g., 'FREQ=WEEKLY;INTERVAL=1'
+  next_occurrence timestamptz -- Next scheduled occurrence for recurring tasks
+-- Subtasks table
+-- Each subtask belongs to a parent task and can be assigned, tracked, and completed independently.
 );
 
+
+-- Subtasks table
+CREATE TABLE IF NOT EXISTS subtasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  description text,
+  status text NOT NULL DEFAULT 'pending',
+  assigned_user_id uuid REFERENCES profiles(id),
+  due_date timestamptz,
+  created_at timestamptz DEFAULT now(),
+  completed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_subtasks_parent_task_id ON subtasks(parent_task_id);
+
+
+-- Indexes for Kanban and recurring tasks
+CREATE INDEX IF NOT EXISTS tasks_kanban_status_idx ON tasks(kanban_status);
+CREATE INDEX IF NOT EXISTS tasks_next_occurrence_idx ON tasks(next_occurrence);
+
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+-- Subtasks RLS policies
+ALTER TABLE subtasks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can view all subtasks"
+  ON subtasks FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE POLICY "Users can insert subtasks for own tasks"
+  ON subtasks FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM tasks WHERE id = parent_task_id AND user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can update subtasks for own tasks"
+  ON subtasks FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM tasks WHERE id = parent_task_id AND user_id = auth.uid())
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM tasks WHERE id = parent_task_id AND user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can delete subtasks for own tasks"
+  ON subtasks FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM tasks WHERE id = parent_task_id AND user_id = auth.uid())
+  );
 
 CREATE POLICY "Authenticated users can view all tasks"
   ON tasks FOR SELECT

@@ -37,15 +37,25 @@ export default function Dashboard({ user }: Props) {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [{ data: tasksData }, { data: profilesData }] = await Promise.all([
+    const [{ data: tasksData }, { data: profilesData }, { data: subtasksData }] = await Promise.all([
       supabase
         .from('tasks')
         .select('*, profiles(id, full_name, email)')
         .order('created_at', { ascending: false }),
       supabase.from('profiles').select('*'),
+      supabase.from('subtasks').select('*'),
     ]);
-    setTasks((tasksData as Task[]) ?? []);
-    setProfiles((profilesData as Profile[]) ?? []);
+    // Defensive: default to empty arrays if null
+    const tasksArr = Array.isArray(tasksData) ? tasksData : [];
+    const subtasksArr = Array.isArray(subtasksData) ? subtasksData : [];
+    const profilesArr = Array.isArray(profilesData) ? profilesData : [];
+    // Attach subtasks to their parent tasks
+    const tasksWithSubtasks = tasksArr.map(t => ({
+      ...t,
+      subtasks: subtasksArr.filter(s => s.parent_task_id === t.id),
+    }));
+    setTasks(tasksWithSubtasks);
+    setProfiles(profilesArr);
     setLoading(false);
   }, []);
 
@@ -407,7 +417,8 @@ export default function Dashboard({ user }: Props) {
                       };
                     }
                     return (
-                      <tr key={t.id} className="hover:bg-gray-50 transition">
+                      <>
+                        <tr key={t.id} className="hover:bg-gray-50 transition">
                         <td className="px-5 py-3 font-medium text-gray-800 whitespace-nowrap">
                           {assignedProfile?.full_name || assignedProfile?.email || 'Unassigned'}
                           {showTimer && <TimerButton />}
@@ -487,7 +498,31 @@ export default function Dashboard({ user }: Props) {
                             </div>
                           )}
                         </td>
-                      </tr>
+                        </tr>
+                        {/* Subtasks display */}
+                        {Array.isArray(t.subtasks) && t.subtasks.length > 0 && (
+                          <tr className="bg-gray-50">
+                            <td colSpan={9} className="px-8 pb-2 pt-1">
+                              <div className="text-xs text-gray-500 mb-1 font-semibold">Subtasks:</div>
+                              <ul className="space-y-1">
+                                {t.subtasks.map((sub: any) => {
+                                  const subAssigned = profiles.find(p => p.id === sub.assigned_user_id);
+                                  return (
+                                    <li key={sub.id} className="flex items-center gap-2 border-b border-gray-100 pb-1 last:border-b-0 last:pb-0">
+                                      <span className="font-medium text-gray-800">{sub.title}</span>
+                                      {sub.status === 'completed' && <span className="text-emerald-600">✔</span>}
+                                      {sub.status === 'in_progress' && <span className="text-blue-600">●</span>}
+                                      {sub.status === 'pending' && <span className="text-gray-400">○</span>}
+                                      <span className="text-gray-500">{subAssigned?.full_name || subAssigned?.email || 'Unassigned'}</span>
+                                      {sub.due_date && <span className="text-gray-400">Due: {formatDate(sub.due_date)}</span>}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })}
                 </tbody>

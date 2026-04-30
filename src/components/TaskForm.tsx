@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase, Task } from '../lib/supabase';
+import { supabase, Task, Profile } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { Loader2, X } from 'lucide-react';
 
@@ -26,7 +26,11 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
           due_date: '',
           assigned_user_id: user.id,
           priority: 'medium',
-          dependencies: undefined as string[] | undefined,
+          dependencies: [] as string[],
+          kanban_status: 'To Do',
+          is_recurring: false,
+          recurrence_rule: '',
+          next_occurrence: '',
         }
       : mode === 'log-time'
       ? {
@@ -40,8 +44,14 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Subtasks state for create mode
+  const [subtasks, setSubtasks] = useState(
+    mode === 'create' ? [
+      // Example: { title: '', description: '', assigned_user_id: user.id, due_date: '', status: 'pending' }
+    ] : []
+  );
 
-  function set(field: string, value: string) {
+  function set(field: string, value: any) {
     setForm(f => ({ ...f, [field]: value }));
   }
 
@@ -73,6 +83,10 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
           status: 'pending',
           priority: (form as any).priority,
           due_date: (form as any).due_date ? new Date((form as any).due_date).toISOString() : null,
+          kanban_status: (form as any).kanban_status,
+          is_recurring: (form as any).is_recurring,
+          recurrence_rule: (form as any).recurrence_rule,
+          next_occurrence: (form as any).next_occurrence ? new Date((form as any).next_occurrence).toISOString() : null,
         }]).select().single();
                       {/* Due date */}
                       <div>
@@ -92,6 +106,21 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
               task_id: inserted.id,
               depends_on_task_id: depId,
             });
+          }
+        }
+        // Insert subtasks if any
+        if (subtasks.length > 0 && inserted) {
+          for (const sub of subtasks) {
+            if (sub.title && sub.title.trim()) {
+              await supabase.from('subtasks').insert({
+                parent_task_id: inserted.id,
+                title: sub.title.trim(),
+                description: sub.description?.trim() || '',
+                assigned_user_id: sub.assigned_user_id || null,
+                due_date: sub.due_date ? new Date(sub.due_date).toISOString() : null,
+                status: sub.status || 'pending',
+              });
+            }
           }
         }
       } else if (mode === 'log-time' && task) {
@@ -168,7 +197,7 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
                                 value={(form as any).dependencies || []}
                                 onChange={e => {
                                   const options = Array.from(e.target.selectedOptions).map(o => o.value);
-                                  set('dependencies', options.length > 0 ? options : undefined);
+                                  set('dependencies', options);
                                 }}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                               >
@@ -180,6 +209,116 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
                               </select>
                               <small className="text-xs text-gray-400">Hold Ctrl/Cmd to select multiple</small>
                             </div>
+              {/* Subtasks Section */}
+              <div className="border border-gray-200 rounded-lg p-3 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Subtasks</label>
+                {subtasks.length === 0 && (
+                  <div className="text-xs text-gray-400 mb-2">No subtasks yet.</div>
+                )}
+                {subtasks.map((sub, idx) => (
+                  <div key={idx} className="mb-3 border-b border-gray-100 pb-2 last:border-b-0 last:pb-0">
+                    <div className="flex gap-2 mb-1">
+                      <input
+                        type="text"
+                        placeholder="Subtask title"
+                        value={sub.title}
+                        onChange={e => setSubtasks(st => st.map((s, i) => i === idx ? { ...s, title: e.target.value } : s))}
+                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                        required
+                      />
+                      <button type="button" onClick={() => setSubtasks(st => st.filter((_, i) => i !== idx))} className="text-xs text-red-500 px-2">Remove</button>
+                    </div>
+                    <textarea
+                      placeholder="Description (optional)"
+                      value={sub.description || ''}
+                      onChange={e => setSubtasks(st => st.map((s, i) => i === idx ? { ...s, description: e.target.value } : s))}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs mb-1"
+                      rows={2}
+                    />
+                    <div className="flex gap-2 mb-1">
+                      <select
+                        value={sub.assigned_user_id || ''}
+                        onChange={e => setSubtasks(st => st.map((s, i) => i === idx ? { ...s, assigned_user_id: e.target.value } : s))}
+                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                      >
+                        <option value="">Unassigned</option>
+                        {profiles.map(p => (
+                          <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="date"
+                        value={sub.due_date || ''}
+                        onChange={e => setSubtasks(st => st.map((s, i) => i === idx ? { ...s, due_date: e.target.value } : s))}
+                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                      />
+                      <select
+                        value={sub.status || 'pending'}
+                        onChange={e => setSubtasks(st => st.map((s, i) => i === idx ? { ...s, status: e.target.value } : s))}
+                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setSubtasks(st => [...st, { title: '', description: '', assigned_user_id: user.id, due_date: '', status: 'pending' }])}
+                  className="mt-2 px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200"
+                >
+                  + Add Subtask
+                </button>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Kanban Status</label>
+                <select
+                  value={(form as any).kanban_status}
+                  onChange={e => set('kanban_status', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="To Do">To Do</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Review">Review</option>
+                  <option value="Done">Done</option>
+                </select>
+              </div>
+              {/* Recurring Task */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Recurring Task?</label>
+                <input
+                  type="checkbox"
+                  checked={(form as any).is_recurring}
+                  onChange={e => set('is_recurring', e.target.checked)}
+                  className="mr-2"
+                />
+                <span className="text-sm">Enable recurrence</span>
+              </div>
+              {(form as any).is_recurring && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Recurrence Rule (RFC 5545)</label>
+                    <input
+                      type="text"
+                      value={(form as any).recurrence_rule}
+                      onChange={e => set('recurrence_rule', e.target.value)}
+                      placeholder="FREQ=WEEKLY;INTERVAL=1"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Next Occurrence</label>
+                    <input
+                      type="datetime-local"
+                      value={(form as any).next_occurrence}
+                      onChange={e => set('next_occurrence', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    />
+                  </div>
+                </>
+              )}
               {/* Priority */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
