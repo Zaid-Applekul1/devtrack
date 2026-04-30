@@ -37,18 +37,21 @@ export default function Dashboard({ user }: Props) {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [{ data: tasksData }, { data: profilesData }, { data: subtasksData }] = await Promise.all([
+    const [tasksRes, profilesRes, subtasksRes] = await Promise.all([
       supabase
         .from('tasks')
-        .select('*, profiles(id, full_name, email)')
+        .select('*')
         .order('created_at', { ascending: false }),
       supabase.from('profiles').select('*'),
       supabase.from('subtasks').select('*'),
     ]);
+    if (tasksRes.error) console.error('[Dashboard] tasks fetch error:', tasksRes.error);
+    if (profilesRes.error) console.error('[Dashboard] profiles fetch error:', profilesRes.error);
+    if (subtasksRes.error) console.error('[Dashboard] subtasks fetch error:', subtasksRes.error);
     // Defensive: default to empty arrays if null
-    const tasksArr = Array.isArray(tasksData) ? tasksData : [];
-    const subtasksArr = Array.isArray(subtasksData) ? subtasksData : [];
-    const profilesArr = Array.isArray(profilesData) ? profilesData : [];
+    const tasksArr = Array.isArray(tasksRes.data) ? tasksRes.data : [];
+    const subtasksArr = Array.isArray(subtasksRes.data) ? subtasksRes.data : [];
+    const profilesArr = Array.isArray(profilesRes.data) ? profilesRes.data : [];
     // Attach subtasks to their parent tasks
     const tasksWithSubtasks = tasksArr.map(t => ({
       ...t,
@@ -400,7 +403,9 @@ export default function Dashboard({ user }: Props) {
                     let TimerButton = null;
                     if (showTimer) {
                       TimerButton = function TimerBtn() {
-                        const { isRunning, elapsed, start, stop } = useTaskTimer(t.id, user);
+                        // Pass start time to useTaskTimer if available
+                        const startTime = t.started_at ? new Date(t.started_at) : null;
+                        const { isRunning, elapsed, start, stop } = useTaskTimer(t.id, user, startTime);
                         function format(sec: number) {
                           const m = Math.floor(sec / 60);
                           const s = sec % 60;
@@ -416,9 +421,8 @@ export default function Dashboard({ user }: Props) {
                         );
                       };
                     }
-                    return (
-                      <>
-                        <tr key={t.id} className="hover:bg-gray-50 transition">
+                    return [
+                      <tr key={t.id} className="hover:bg-gray-50 transition">
                         <td className="px-5 py-3 font-medium text-gray-800 whitespace-nowrap">
                           {assignedProfile?.full_name || assignedProfile?.email || 'Unassigned'}
                           {showTimer && <TimerButton />}
@@ -498,32 +502,30 @@ export default function Dashboard({ user }: Props) {
                             </div>
                           )}
                         </td>
+                      </tr>,
+                      Array.isArray(t.subtasks) && t.subtasks.length > 0 && (
+                        <tr key={`subtasks-${t.id}`} className="bg-gray-50">
+                          <td colSpan={9} className="px-8 pb-2 pt-1">
+                            <div className="text-xs text-gray-500 mb-1 font-semibold">Subtasks:</div>
+                            <ul className="space-y-1">
+                              {t.subtasks.map((sub: any) => {
+                                const subAssigned = profiles.find(p => p.id === sub.assigned_user_id);
+                                return (
+                                  <li key={sub.id} className="flex items-center gap-2 border-b border-gray-100 pb-1 last:border-b-0 last:pb-0">
+                                    <span className="font-medium text-gray-800">{sub.title}</span>
+                                    {sub.status === 'completed' && <span className="text-emerald-600">✔</span>}
+                                    {sub.status === 'in_progress' && <span className="text-blue-600">●</span>}
+                                    {sub.status === 'pending' && <span className="text-gray-400">○</span>}
+                                    <span className="text-gray-500">{subAssigned?.full_name || subAssigned?.email || 'Unassigned'}</span>
+                                    {sub.due_date && <span className="text-gray-400">Due: {formatDate(sub.due_date)}</span>}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </td>
                         </tr>
-                        {/* Subtasks display */}
-                        {Array.isArray(t.subtasks) && t.subtasks.length > 0 && (
-                          <tr className="bg-gray-50">
-                            <td colSpan={9} className="px-8 pb-2 pt-1">
-                              <div className="text-xs text-gray-500 mb-1 font-semibold">Subtasks:</div>
-                              <ul className="space-y-1">
-                                {t.subtasks.map((sub: any) => {
-                                  const subAssigned = profiles.find(p => p.id === sub.assigned_user_id);
-                                  return (
-                                    <li key={sub.id} className="flex items-center gap-2 border-b border-gray-100 pb-1 last:border-b-0 last:pb-0">
-                                      <span className="font-medium text-gray-800">{sub.title}</span>
-                                      {sub.status === 'completed' && <span className="text-emerald-600">✔</span>}
-                                      {sub.status === 'in_progress' && <span className="text-blue-600">●</span>}
-                                      {sub.status === 'pending' && <span className="text-gray-400">○</span>}
-                                      <span className="text-gray-500">{subAssigned?.full_name || subAssigned?.email || 'Unassigned'}</span>
-                                      {sub.due_date && <span className="text-gray-400">Due: {formatDate(sub.due_date)}</span>}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </td>
-                          </tr>
-                        )}
-                      </>
-                    );
+                      )
+                    ];
                   })}
                 </tbody>
               </table>
@@ -540,6 +542,7 @@ export default function Dashboard({ user }: Props) {
           profiles={profiles}
           tasks={tasks}
           onSuccess={() => {
+            console.log('[Dashboard] onSuccess called, reloading data');
             setShowForm(false);
             setSelectedTask(null);
             fetchData();

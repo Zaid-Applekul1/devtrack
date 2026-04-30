@@ -14,6 +14,19 @@ type Props = {
 };
 
 export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'create', profiles, tasks }: Props) {
+  // Defensive: Ensure profiles is always an array and always includes the current user
+  profiles = Array.isArray(profiles) ? profiles : [];
+  const userInProfiles = profiles.some(p => p.id === user.id);
+  const profilesWithUser = userInProfiles
+    ? profiles
+    : [
+        ...profiles,
+        {
+          id: user.id,
+          full_name: user.user_metadata?.full_name || '',
+          email: user.email || '',
+        } as Profile,
+      ];
   // TODO: Pass profiles and tasks as props for assignment and dependencies
   const [form, setForm] = useState(
     mode === 'create'
@@ -31,6 +44,7 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
           is_recurring: false,
           recurrence_rule: '',
           next_occurrence: '',
+          started_at: '',
         }
       : mode === 'log-time'
       ? {
@@ -60,6 +74,13 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
     setError('');
     setLoading(true);
 
+    // Prevent task creation if user profile does not exist
+    if (!profiles.some(p => p.id === user.id)) {
+      setError('Your profile is not set up yet. Please sign out and sign in again.');
+      setLoading(false);
+      return;
+    }
+
     try {
       if (mode === 'create') {
         const estTime = parseFloat((form as any).estimated_time);
@@ -70,8 +91,8 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
           throw new Error('Module name is required.');
         }
 
-        // Insert task with assignment and priority
-        const { data: inserted, error } = await supabase.from('tasks').insert([{
+        // Prepare insert payload
+        const insertPayload = {
           user_id: user.id,
           assigned_user_id: (form as any).assigned_user_id,
           repository_name: (form as any).repository_name.trim(),
@@ -87,7 +108,21 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
           is_recurring: (form as any).is_recurring,
           recurrence_rule: (form as any).recurrence_rule,
           next_occurrence: (form as any).next_occurrence ? new Date((form as any).next_occurrence).toISOString() : null,
-        }]).select().single();
+          started_at: (form as any).started_at ? new Date((form as any).started_at).toISOString() : null,
+        };
+                      {/* Start time */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Start time (optional)</label>
+                        <input
+                          type="datetime-local"
+                          value={(form as any).started_at}
+                          onChange={e => set('started_at', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                        />
+                      </div>
+        console.log('Insert payload for tasks:', insertPayload);
+        // Insert task with assignment and priority
+        const { data: inserted, error } = await supabase.from('tasks').insert([insertPayload]).select().single();
                       {/* Due date */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Due date</label>
@@ -151,6 +186,26 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
         if (error) throw error;
       }
 
+      // Clear form and subtasks after successful save
+      if (mode === 'create') {
+        setForm({
+          repository_name: '',
+          branch_name: '',
+          commit_message: '',
+          module_name: '',
+          estimated_time: '',
+          due_date: '',
+          assigned_user_id: user.id,
+          priority: 'medium',
+          dependencies: [],
+          kanban_status: 'To Do',
+          is_recurring: false,
+          recurrence_rule: '',
+          next_occurrence: '',
+          started_at: '',
+        });
+        setSubtasks([]);
+      }
       onSuccess();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save task.');
@@ -177,17 +232,22 @@ export default function TaskForm({ user, task, onSuccess, onCancel, mode = 'crea
               {/* Assignment */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Assign to</label>
-                <select
-                  value={(form as any).assigned_user_id}
-                  onChange={e => set('assigned_user_id', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {profiles.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.full_name || p.email}
-                    </option>
-                  ))}
-                </select>
+                {profilesWithUser.length === 0 ? (
+                  <div className="text-xs text-gray-400 mb-2">No users available to assign.</div>
+                ) : (
+                  <select
+                    value={(form as any).assigned_user_id}
+                    onChange={e => set('assigned_user_id', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {profilesWithUser.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.full_name || p.email}
+                        {p.id === user.id ? ' (Me)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
                             {/* Dependencies multi-select */}
                             <div>
